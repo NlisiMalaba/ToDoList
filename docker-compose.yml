@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Default=Server=db;Port=3306;Database=todo_db;User=todo_user;Password=todo_password;
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ConnectionStrings__Default=${ConnectionStrings__Default:-Server=db;Port=3306;Database=todo_db;User=todo_user;Password=todo_password;}
     ports:
       - "8081:80"
     depends_on:
