@@ -1,5 +1,8 @@
+# For registry deployment set DOCKER_REGISTRY and IMAGE_TAG on the server.
+# Local dev: uses build and defaults (local/todolist-api:latest).
 services:
   api:
+    image: ${DOCKER_REGISTRY:-local}/todolist-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
