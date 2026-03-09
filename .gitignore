@@ -1,0 +1,58 @@
+# Visual Studio / Rider / Cursor
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.rsuser
+.idea/
+*.slnx/
+
+# Build
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+out/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# .NET
+*.dll
+*.exe
+*.pdb
+*.cache
+*.log
+*.vspscc
+*.vssscc
+.build/
+*.pidb
+*.svclog
+*.scc
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+[Cc]overage/
+*.trx
+*.coverage
+*.coveragexml
+.coverage
+
+# Misc
+*.bak
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.local
