@@ -98,8 +98,8 @@ pipeline {
       when { anyOf { branch 'staging'; branch 'main' } }
       steps {
         echo "[Build] Restoring and building .NET project (Release)..."
-        sh 'dotnet restore'
-        sh 'dotnet build --configuration Release --no-restore'
+        sh 'dotnet restore src/ToDoList.Api/ToDoList.Api.csproj'
+        sh 'dotnet build src/ToDoList.Api/ToDoList.Api.csproj --configuration Release --no-restore'
         echo "[Build] Build completed successfully."
       }
     }
@@ -108,7 +108,7 @@ pipeline {
       when { anyOf { branch 'staging'; branch 'main' } }
       steps {
         echo "[Test] Running unit tests..."
-        sh 'dotnet test --configuration Release --no-build --verbosity normal'
+        sh 'dotnet test src/ToDoList.UnitTests/ToDoList.UnitTests.csproj --configuration Release --verbosity normal'
         echo "[Test] All tests passed."
       }
     }
