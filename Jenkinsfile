@@ -7,18 +7,12 @@
 // - Set DOCKER_REGISTRY (job or global env) to your registry URL, e.g. registry.example.com
 // - Create Username/Password credential with id 'docker-registry-credentials' for push
 // - SSH credentials as defined in SSH_CRED_126 and SSH_CRED_144
+// - Agent: Linux node (Ubuntu 22.04 recommended) with Docker daemon running.
+//   For Docker agent support, install the "Docker Pipeline" plugin and switch back to docker agent.
 // =============================================================================
 
 pipeline {
-  agent {
-    docker {
-      // Runs the pipeline in a known-good environment that has .NET 8 available.
-      // We mount the host Docker socket so `docker build/push` works from inside the agent container.
-      image 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
-      args '-v /var/run/docker.sock:/var/run/docker.sock'
-      reuseNode true
-    }
-  }
+  agent any
 
   options {
     skipDefaultCheckout(true)
@@ -56,7 +50,7 @@ pipeline {
     stage('Prepare Tools') {
       when { anyOf { branch 'staging'; branch 'main' } }
       steps {
-        echo "[Prepare Tools] Installing required CLI tools (docker, curl, ssh, git)..."
+        echo "[Prepare Tools] Installing required CLI tools (.NET 8, docker, curl, ssh, git)..."
         sh '''
           set -e
           apt-get update
@@ -65,7 +59,15 @@ pipeline {
             curl \
             git \
             openssh-client \
+            wget \
             docker.io
+          # Install .NET 8 SDK (Ubuntu 22.04 / jammy)
+          if ! command -v dotnet &>/dev/null; then
+            wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
+            dpkg -i /tmp/packages-microsoft-prod.deb
+            apt-get update
+            apt-get install -y dotnet-sdk-8.0
+          fi
           rm -rf /var/lib/apt/lists/*
           docker --version
           dotnet --version
