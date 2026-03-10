@@ -50,28 +50,28 @@ pipeline {
     stage('Prepare Tools') {
       when { anyOf { branch 'staging'; branch 'main' } }
       steps {
-        echo "[Prepare Tools] Installing required CLI tools (.NET 8, docker, curl, ssh, git)..."
+        echo "[Prepare Tools] Verifying required CLI tools (.NET 8, docker, curl, ssh, git) are available on the agent..."
         sh '''
           set -e
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            git \
-            openssh-client \
-            wget \
-            docker.io
-          # Install .NET 8 SDK (Ubuntu 22.04 / jammy)
-          if ! command -v dotnet &>/dev/null; then
-            wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
-            dpkg -i /tmp/packages-microsoft-prod.deb
-            apt-get update
-            apt-get install -y dotnet-sdk-8.0
-          fi
-          rm -rf /var/lib/apt/lists/*
+
+          echo "[Prepare Tools] Checking docker..."
+          command -v docker >/dev/null 2>&1 || { echo "docker is not installed or not in PATH on this agent."; exit 1; }
           docker --version
+
+          echo "[Prepare Tools] Checking dotnet..."
+          command -v dotnet >/dev/null 2>&1 || { echo "dotnet SDK is not installed or not in PATH on this agent."; exit 1; }
           dotnet --version
+
+          echo "[Prepare Tools] Checking git..."
+          command -v git >/dev/null 2>&1 || { echo "git is not installed or not in PATH on this agent."; exit 1; }
+          git --version
+
+          echo "[Prepare Tools] Checking ssh..."
+          command -v ssh >/dev/null 2>&1 || { echo "ssh client is not installed or not in PATH on this agent."; exit 1; }
           ssh -V || true
+
+          echo "[Prepare Tools] Checking curl..."
+          command -v curl >/dev/null 2>&1 || { echo "curl is not installed or not in PATH on this agent."; exit 1; }
           curl --version
         '''
       }
