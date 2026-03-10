@@ -8,10 +8,13 @@
 // - Create Username/Password credential with id 'docker-registry-credentials' for push
 // - SSH credentials as defined in SSH_CRED_126 and SSH_CRED_144
 // - Agent: Linux node (Ubuntu 22.04 recommended) with Docker daemon running.
+//   Either: (a) Run this job on an agent that has Docker installed and in PATH, or
+//   (b) In Jenkins, add a label (e.g. 'docker') to such agents and use: agent { label 'docker' }
 //   For Docker agent support, install the "Docker Pipeline" plugin and switch back to docker agent.
 // =============================================================================
 
 pipeline {
+  // Use an agent that has Docker, .NET 8, git, ssh, curl. Set label in Jenkins to match your Docker-capable node(s).
   agent any
 
   options {
@@ -55,7 +58,12 @@ pipeline {
           set -e
 
           echo "[Prepare Tools] Checking docker..."
-          command -v docker >/dev/null 2>&1 || { echo "docker is not installed or not in PATH on this agent."; exit 1; }
+          command -v docker >/dev/null 2>&1 || {
+            echo "ERROR: docker is not installed or not in PATH on this agent."
+            echo "This pipeline requires an agent with: Docker, .NET 8 SDK, git, ssh, curl."
+            echo "Fix: Install Docker on the agent, or in Jenkins assign this job to a node that has Docker (see Jenkinsfile header)."
+            exit 1
+          }
           docker --version
 
           echo "[Prepare Tools] Checking dotnet..."
