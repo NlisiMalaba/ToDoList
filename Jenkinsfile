@@ -15,8 +15,8 @@
 
 pipeline {
   // Use an agent that has Docker, .NET 8, git, ssh, curl. Set label in Jenkins to match your Docker-capable node(s).
-  //agent any
-  agent { label 'docker' }
+  agent any
+  //agent { label 'docker' }
 
   options {
     skipDefaultCheckout(true)
