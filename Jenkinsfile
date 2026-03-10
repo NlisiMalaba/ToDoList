@@ -10,7 +10,15 @@
 // =============================================================================
 
 pipeline {
-  agent any
+  agent {
+    docker {
+      // Runs the pipeline in a known-good environment that has .NET 8 available.
+      // We mount the host Docker socket so `docker build/push` works from inside the agent container.
+      image 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
+      args '-v /var/run/docker.sock:/var/run/docker.sock'
+      reuseNode true
+    }
+  }
 
   options {
     skipDefaultCheckout(true)
@@ -45,6 +53,28 @@ pipeline {
   }
 
   stages {
+    stage('Prepare Tools') {
+      when { anyOf { branch 'staging'; branch 'main' } }
+      steps {
+        echo "[Prepare Tools] Installing required CLI tools (docker, curl, ssh, git)..."
+        sh '''
+          set -e
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            openssh-client \
+            docker.io
+          rm -rf /var/lib/apt/lists/*
+          docker --version
+          dotnet --version
+          ssh -V || true
+          curl --version
+        '''
+      }
+    }
+
     stage('Checkout') {
       steps {
         echo "[Checkout] Checking out source..."
