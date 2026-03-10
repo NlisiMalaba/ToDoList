@@ -4,7 +4,8 @@
 // Staging/Testing from branch 'staging'; Production from 'main' (manual approval).
 //
 // Required Jenkins configuration:
-// - Set DOCKER_REGISTRY (job or global env) to your registry URL, e.g. registry.example.com
+// - Set DOCKER_REGISTRY (job or global env) to your registry; can be host:port e.g. 10.50.30.126:8081 or 10.50.30.126:5000
+// - For HTTP (insecure) registries, add "insecure-registries": ["10.50.30.126:8081"] to Docker daemon on agent and deploy hosts
 // - Create Username/Password credential with id 'docker-registry-credentials' for push
 // - SSH credentials as defined in SSH_CRED_126 and SSH_CRED_144
 // - Agent: Linux node (Ubuntu 22.04 recommended) with Docker daemon running.
@@ -29,7 +30,7 @@ pipeline {
     DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 
     APP_IMAGE_NAME       = "todolist-api"
-    DOCKER_REGISTRY      = "${env.DOCKER_REGISTRY ?: 'registry.example.com'}"  // Override in Jenkins env
+    DOCKER_REGISTRY      = "${env.DOCKER_REGISTRY ?: '10.50.30.126:8081'}"     // Override in Jenkins; use host:port for private registry
     IMAGE_TAG            = "${env.GIT_COMMIT ?: 'unknown'}"
 
     STAGING_HOST         = "10.50.30.126"
@@ -125,6 +126,15 @@ pipeline {
     stage('Push Image') {
       when { anyOf { branch 'staging'; branch 'main' } }
       steps {
+        script {
+          if (env.DOCKER_REGISTRY == null || env.DOCKER_REGISTRY == '' || env.DOCKER_REGISTRY == 'registry.example.com') {
+            error '''[Push Image] DOCKER_REGISTRY is not set or still the placeholder (registry.example.com).
+Configure it in Jenkins:
+  - Job: Configure → This project is parameterized / Environment → Add "DOCKER_REGISTRY" with value e.g. docker.io or ghcr.io/your-org
+  - Or: Manage Jenkins → System → Global properties → Environment variables → DOCKER_REGISTRY = your-registry-host
+Then ensure credential id "docker-registry-credentials" has valid username/password for that registry.'''
+          }
+        }
         echo "[Push Image] Pushing to ${DOCKER_REGISTRY}/${APP_IMAGE_NAME}:${IMAGE_TAG}"
         withCredentials([usernamePassword(
           credentialsId: 'docker-registry-credentials',
