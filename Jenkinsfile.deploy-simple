@@ -46,7 +46,6 @@ pipeline {
     }
 
     stage('Build') {
-      when { branch 'staging' }
       steps {
         echo 'Building .NET project (Release)...'
         sh 'dotnet restore src/ToDoList.Api/ToDoList.Api.csproj'
@@ -55,7 +54,6 @@ pipeline {
     }
 
     stage('Test') {
-      when { branch 'staging' }
       steps {
         echo 'Running unit tests...'
         sh 'dotnet test src/ToDoList.UnitTests/ToDoList.UnitTests.csproj --configuration Release --verbosity normal --no-build'
@@ -63,7 +61,6 @@ pipeline {
     }
 
     stage('Deploy') {
-      when { branch 'staging' }
       steps {
         script {
           deployViaSsh(
