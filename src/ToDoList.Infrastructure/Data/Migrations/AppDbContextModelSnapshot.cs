@@ -2,6 +2,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using ToDoList.Domain.Entities;
 using ToDoList.Infrastructure.Data;
 
 #nullable disable
@@ -83,7 +84,7 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
 
                 b.ToTable("todo_tasks", (string)null);
 
-                b.HasQueryFilter(t => !t.IsDeleted);
+                b.HasQueryFilter((TodoTask t) => !t.IsDeleted);
             });
     }
 }

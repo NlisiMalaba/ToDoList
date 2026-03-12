@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.EntityFrameworkCore.Migrations;
 using ToDoList.Infrastructure.Data;
+using ToDoList.Domain.Entities;
 
 #nullable disable
 
@@ -86,7 +87,7 @@ partial class InitialCreate
 
                 b.ToTable("todo_tasks");
 
-                b.HasQueryFilter(t => !t.IsDeleted);
+                b.HasQueryFilter((TodoTask t) => !t.IsDeleted);
             });
     }
 }
