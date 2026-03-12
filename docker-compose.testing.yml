@@ -1,0 +1,42 @@
+services:
+  edge:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "${TESTING_EDGE_PORT:-8080}:80"
+    environment:
+      - TESTING_BASIC_AUTH_USER=${TESTING_BASIC_AUTH_USER}
+      - TESTING_BASIC_AUTH_PASSWORD_HASH=${TESTING_BASIC_AUTH_PASSWORD_HASH}
+    volumes:
+      - ./deploy/caddy/Caddyfile.testing:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+
+  api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+      - ConnectionStrings__Default=Server=testing-db;Port=3306;Database=${TESTING_DB_NAME};User=${TESTING_DB_USER};Password=${TESTING_DB_PASSWORD};
+    depends_on:
+      testing-db:
+        condition: service_healthy
+
+  testing-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${TESTING_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${TESTING_DB_NAME}
+      - MYSQL_USER=${TESTING_DB_USER}
+      - MYSQL_PASSWORD=${TESTING_DB_PASSWORD}
+    ports:
+      - "${TESTING_DB_PORT:-23306}:3306"
+    volumes:
+      - mysql_data_testing:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TESTING_DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data_testing:
+

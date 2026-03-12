@@ -1,0 +1,39 @@
+services:
+  edge:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "${PROD_EDGE_PORT:-8080}:80"
+    volumes:
+      - ./deploy/caddy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+
+  api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Default=Server=prod-db;Port=3306;Database=${PROD_DB_NAME};User=${PROD_DB_USER};Password=${PROD_DB_PASSWORD};
+    depends_on:
+      prod-db:
+        condition: service_healthy
+
+  prod-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${PROD_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${PROD_DB_NAME}
+      - MYSQL_USER=${PROD_DB_USER}
+      - MYSQL_PASSWORD=${PROD_DB_PASSWORD}
+    ports:
+      - "${PROD_DB_PORT:-33306}:3306"
+    volumes:
+      - mysql_data_prod:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${PROD_DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data_prod:
+

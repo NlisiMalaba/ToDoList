@@ -8,9 +8,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
-      - ConnectionStrings__Default=${ConnectionStrings__Default:-Server=db;Port=3306;Database=todo_db;User=todo_user;Password=todo_password;}
+      - ConnectionStrings__Default=${ConnectionStrings__Default:-Server=db;Port=3306;Database=${MYSQL_DATABASE:-todo_db};User=${MYSQL_USER:-todo_user};Password=${MYSQL_PASSWORD:-todo_password};}
     ports:
-      - "8081:80"
+      - "${API_PORT:-8081}:80"
     depends_on:
       db:
         condition: service_healthy
@@ -18,16 +18,16 @@ services:
   db:
     image: mysql:8.0
     environment:
-      - MYSQL_ROOT_PASSWORD=root123
-      - MYSQL_DATABASE=todo_db
-      - MYSQL_USER=todo_user
-      - MYSQL_PASSWORD=todo_password
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-todo_db}
+      - MYSQL_USER=${MYSQL_USER:-todo_user}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-todo_password}
     ports:
-      - "13306:3306"   # host 13306 to avoid conflict with local MySQL
+      - "${MYSQL_PORT:-13306}:3306"   # host 13306 to avoid conflict with local MySQL
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root123}"]
       interval: 5s
       timeout: 5s
       retries: 10

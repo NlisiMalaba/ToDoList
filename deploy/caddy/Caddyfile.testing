@@ -1,0 +1,13 @@
+{
+	auto_https off
+}
+
+:80 {
+	# QA environment: protect with basic auth (or replace with SSO in front).
+	basicauth {
+		{$TESTING_BASIC_AUTH_USER} {$TESTING_BASIC_AUTH_PASSWORD_HASH}
+	}
+
+	reverse_proxy api:80
+}
+
