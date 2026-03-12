@@ -64,10 +64,14 @@ pipeline {
       steps {
         script {
           echo "Deploying to ${env.DEPLOY_HOST}:${env.DEPLOY_REMOTE_PATH} (branch: staging)..."
-          sshagent(credentials: [env.DEPLOY_SSH_CREDENTIAL_ID]) {
+          withCredentials([sshUserPrivateKey(
+            credentialsId: env.DEPLOY_SSH_CREDENTIAL_ID,
+            keyFileVariable: 'DEPLOY_SSH_KEY_FILE',
+            usernameVariable: 'DEPLOY_SSH_USERNAME'
+          )]) {
             sh """
               set -e
-              ssh ${env.SSH_OPTS} ${env.DEPLOY_HOST} /bin/bash -s -- "${env.DEPLOY_REMOTE_PATH}" "${env.DEPLOY_REPO_URL}" "staging" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
+              ssh ${env.SSH_OPTS} -i "$DEPLOY_SSH_KEY_FILE" "$DEPLOY_SSH_USERNAME@${env.DEPLOY_HOST}" /bin/bash -s -- "${env.DEPLOY_REMOTE_PATH}" "${env.DEPLOY_REPO_URL}" "staging" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
                 set -e
                 REMOTE_PATH="\$1"
                 REPO_URL="\$2"
