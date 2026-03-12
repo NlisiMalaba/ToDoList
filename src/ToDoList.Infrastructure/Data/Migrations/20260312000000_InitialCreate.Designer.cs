@@ -86,8 +86,6 @@ partial class InitialCreate
                     .HasDatabaseName("ix_todo_tasks_is_completed");
 
                 b.ToTable("todo_tasks");
-
-                b.HasQueryFilter((TodoTask t) => !t.IsDeleted);
             });
     }
 }
