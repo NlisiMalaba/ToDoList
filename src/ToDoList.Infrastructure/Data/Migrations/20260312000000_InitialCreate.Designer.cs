@@ -86,7 +86,7 @@ partial class InitialCreate
 
                 b.ToTable("todo_tasks");
 
-                b.HasQueryFilter("!IsDeleted");
+                b.HasQueryFilter(t => !t.IsDeleted);
             });
     }
 }
