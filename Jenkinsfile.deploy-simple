@@ -63,13 +63,36 @@ pipeline {
     stage('Deploy') {
       steps {
         script {
-          deployViaSsh(
-            host: env.DEPLOY_HOST,
-            credId: env.DEPLOY_SSH_CREDENTIAL_ID,
-            remotePath: env.DEPLOY_REMOTE_PATH,
-            repoUrl: env.DEPLOY_REPO_URL,
-            branch: 'staging'
-          )
+          echo "Deploying to ${env.DEPLOY_HOST}:${env.DEPLOY_REMOTE_PATH} (branch: staging)..."
+          sshagent(credentials: [env.DEPLOY_SSH_CREDENTIAL_ID]) {
+            sh """
+              set -e
+              ssh ${env.SSH_OPTS} ${env.DEPLOY_HOST} /bin/bash -s -- "${env.DEPLOY_REMOTE_PATH}" "${env.DEPLOY_REPO_URL}" "staging" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
+                set -e
+                REMOTE_PATH="\$1"
+                REPO_URL="\$2"
+                BRANCH="\$3"
+                COMMIT="\$4"
+                PARENT="\$(dirname "\$REMOTE_PATH")"
+                DIRNAME="\$(basename "\$REMOTE_PATH")"
+                if [ ! -d "\$REMOTE_PATH/.git" ]; then
+                  if [ -z "\$REPO_URL" ]; then echo "ERROR: Repo not on server and REPO_URL not provided."; exit 1; fi
+                  echo "Project not found; cloning \$REPO_URL into \$REMOTE_PATH..."
+                  mkdir -p "\$PARENT"
+                  git clone "\$REPO_URL" "\$REMOTE_PATH"
+                  cd "\$REMOTE_PATH"
+                else
+                  cd "\$REMOTE_PATH" || { echo "ERROR: Cannot cd to \$REMOTE_PATH"; exit 1; }
+                fi
+                git fetch --all
+                git checkout -B "\$BRANCH" "origin/\$BRANCH" 2>/dev/null || git checkout "\$BRANCH" || true
+                git reset --hard "\$COMMIT"
+                docker compose up --build -d
+                echo "Deploy completed: \$(docker compose ps 2>/dev/null || true)"
+REMOTE_SCRIPT
+            """
+          }
+          echo "Deploy finished. Application should be up at http://${env.DEPLOY_HOST}:8081"
         }
       }
     }
@@ -83,37 +106,4 @@ pipeline {
       echo 'Build, test and deploy completed successfully.'
     }
   }
-}
-
-void deployViaSsh(String host, String credId, String remotePath, String repoUrl, String branch) {
-  echo "Deploying to ${host}:${remotePath} (branch: ${branch})..."
-  sshagent(credentials: [credId]) {
-    sh """
-      set -e
-      ssh ${env.SSH_OPTS} ${host} /bin/bash -s -- "${remotePath}" "${repoUrl}" "${branch}" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
-        set -e
-        REMOTE_PATH="\$1"
-        REPO_URL="\$2"
-        BRANCH="\$3"
-        COMMIT="\$4"
-        PARENT="\$(dirname "\$REMOTE_PATH")"
-        DIRNAME="\$(basename "\$REMOTE_PATH")"
-        if [ ! -d "\$REMOTE_PATH/.git" ]; then
-          if [ -z "\$REPO_URL" ]; then echo "ERROR: Repo not on server and REPO_URL not provided."; exit 1; fi
-          echo "Project not found; cloning \$REPO_URL into \$REMOTE_PATH..."
-          mkdir -p "\$PARENT"
-          git clone "\$REPO_URL" "\$REMOTE_PATH"
-          cd "\$REMOTE_PATH"
-        else
-          cd "\$REMOTE_PATH" || { echo "ERROR: Cannot cd to \$REMOTE_PATH"; exit 1; }
-        fi
-        git fetch --all
-        git checkout -B "\$BRANCH" "origin/\$BRANCH" 2>/dev/null || git checkout "\$BRANCH" || true
-        git reset --hard "\$COMMIT"
-        docker compose up --build -d
-        echo "Deploy completed: \$(docker compose ps 2>/dev/null || true)"
-REMOTE_SCRIPT
-    """
-  }
-  echo "Deploy finished. Application should be up at http://${host}:8081"
 }
