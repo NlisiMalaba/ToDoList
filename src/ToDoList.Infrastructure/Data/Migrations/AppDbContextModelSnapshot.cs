@@ -83,8 +83,6 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                     .HasDatabaseName("ix_todo_tasks_is_completed");
 
                 b.ToTable("todo_tasks", (string)null);
-
-                b.HasQueryFilter((TodoTask t) => !t.IsDeleted);
             });
     }
 }
