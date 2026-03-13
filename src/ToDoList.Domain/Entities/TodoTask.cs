@@ -5,7 +5,7 @@ namespace ToDoList.Domain.Entities;
 public class TodoTask
 {
     public Guid Id { get; private set; }
-    public string Title { get; private set; }
+    public string Title { get; private set; } = null!; // Set by constructor or EF when materializing
     public string? Description { get; private set; }
     public bool IsCompleted { get; private set; }
 
@@ -15,7 +15,7 @@ public class TodoTask
     public string? UpdatedBy { get; private set; }
     public bool IsDeleted { get; private set; }
 
-    public byte[] RowVersion { get; private set; } = Array.Empty<byte>();
+    public DateTime RowVersion { get; private set; }
 
     private TodoTask()
     {

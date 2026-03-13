@@ -55,4 +55,8 @@ artifacts/
 Thumbs.db
 .env
 .env.local
+# Ignore actual env files (secrets) - keep .example templates
+config/.env.staging
+config/.env.testing
+config/.env.production
 *.local

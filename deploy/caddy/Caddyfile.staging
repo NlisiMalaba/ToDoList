@@ -1,0 +1,19 @@
+{
+	# Keep access logs minimal; send to stdout for docker logging.
+	auto_https off
+}
+
+:80 {
+	# Dev-only environment: protect with basic auth and optionally IP allowlist.
+	#
+	# To enable IP allowlist, set STAGING_ALLOWED_CIDRS (space-separated) and uncomment:
+	# @allowed remote_ip {$STAGING_ALLOWED_CIDRS}
+	# respond @allowed 403
+
+	basicauth {
+		{$STAGING_BASIC_AUTH_USER} {$STAGING_BASIC_AUTH_PASSWORD_HASH}
+	}
+
+	reverse_proxy api:80
+}
+

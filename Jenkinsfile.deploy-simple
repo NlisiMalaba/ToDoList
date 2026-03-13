@@ -1,0 +1,113 @@
+// =============================================================================
+// ToDoList - Simple CI/CD: Build & Test on Jenkins, Deploy via SSH (git pull + docker compose)
+// Matches manual flow: ssh → cd ToDoList → git pull → docker compose up --build -d
+//
+// Required in Jenkins:
+// 1. Credential: SSH Username with private key
+//    - ID: ssh-deploy-10-50-30-126 (or set env DEPLOY_SSH_CREDENTIAL_ID)
+//    - Username: adminfeedback
+//    - Private key: key that can log in to 10.50.30.126
+// 2. Deploy host must have: git, Docker, docker compose.
+// 3. If the project is not on the server, the pipeline will clone it on first run (set DEPLOY_REPO_URL if needed).
+// 4. Optional: set DEPLOY_REMOTE_PATH if ToDoList is not in /home/adminfeedback/ToDoList
+// =============================================================================
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  // Prefer a webhook-triggered Multibranch Pipeline for instant builds.
+  // Fallback (if you can't use webhooks): enable SCM polling in Jenkins with this trigger.
+  // NOTE: Polling interval can be adjusted; keep it reasonable to reduce SCM load.
+  triggers {
+    pollSCM('H/2 * * * *')
+  }
+
+  environment {
+    DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+    DEPLOY_HOST              = "${env.DEPLOY_HOST ?: '10.50.30.126'}"
+    DEPLOY_REMOTE_PATH       = "${env.DEPLOY_REMOTE_PATH ?: '/home/adminfeedback/ToDoList'}"
+    DEPLOY_REPO_URL          = "${env.DEPLOY_REPO_URL ?: env.GIT_URL ?: ''}"   // Clone URL; default from SCM
+    DEPLOY_SSH_CREDENTIAL_ID = "${env.DEPLOY_SSH_CREDENTIAL_ID ?: 'ssh-deploy-10-50-30-126'}"
+    SSH_OPTS                 = "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ConnectTimeout=15 -o BatchMode=yes"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        echo "Commit: ${env.GIT_COMMIT}"
+      }
+    }
+
+    stage('Build') {
+      steps {
+        echo 'Building .NET project (Release)...'
+        sh 'dotnet restore src/ToDoList.Api/ToDoList.Api.csproj'
+        sh 'dotnet build src/ToDoList.Api/ToDoList.Api.csproj --configuration Release --no-restore'
+      }
+    }
+
+    stage('Test') {
+      steps {
+        echo 'Running unit tests...'
+        sh 'dotnet test src/ToDoList.UnitTests/ToDoList.UnitTests.csproj --configuration Release --verbosity normal --no-build'
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        script {
+          echo "Deploying to ${env.DEPLOY_HOST}:${env.DEPLOY_REMOTE_PATH} (branch: staging)..."
+          withCredentials([sshUserPrivateKey(
+            credentialsId: env.DEPLOY_SSH_CREDENTIAL_ID,
+            keyFileVariable: 'DEPLOY_SSH_KEY_FILE',
+            usernameVariable: 'DEPLOY_SSH_USERNAME'
+          )]) {
+            sh """
+              set -e
+              ssh ${env.SSH_OPTS} -i "$DEPLOY_SSH_KEY_FILE" "$DEPLOY_SSH_USERNAME@${env.DEPLOY_HOST}" /bin/bash -s -- "${env.DEPLOY_REMOTE_PATH}" "${env.DEPLOY_REPO_URL}" "staging" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
+                set -e
+                REMOTE_PATH="\$1"
+                REPO_URL="\$2"
+                BRANCH="\$3"
+                COMMIT="\$4"
+                PARENT="\$(dirname "\$REMOTE_PATH")"
+                DIRNAME="\$(basename "\$REMOTE_PATH")"
+                if [ ! -d "\$REMOTE_PATH/.git" ]; then
+                  if [ -z "\$REPO_URL" ]; then echo "ERROR: Repo not on server and REPO_URL not provided."; exit 1; fi
+                  echo "Project not found; cloning \$REPO_URL into \$REMOTE_PATH..."
+                  mkdir -p "\$PARENT"
+                  git clone "\$REPO_URL" "\$REMOTE_PATH"
+                  cd "\$REMOTE_PATH"
+                else
+                  cd "\$REMOTE_PATH" || { echo "ERROR: Cannot cd to \$REMOTE_PATH"; exit 1; }
+                fi
+                git fetch --all
+                git checkout -B "\$BRANCH" "origin/\$BRANCH" 2>/dev/null || git checkout "\$BRANCH" || true
+                git reset --hard "\$COMMIT"
+                docker compose up --build -d
+                echo "Deploy completed: \$(docker compose ps 2>/dev/null || true)"
+REMOTE_SCRIPT
+            """
+          }
+          echo "Deploy finished. Application should be up at http://${env.DEPLOY_HOST}:8081"
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo 'Pipeline failed. Check logs above.'
+    }
+    success {
+      echo 'Build, test and deploy completed successfully.'
+    }
+  }
+}

@@ -1,313 +1,210 @@
-// =============================================================================
-// ToDoList API - CI/CD Pipeline
-// Builds .NET, runs tests, builds and pushes Docker image, deploys via SSH.
-// Staging/Testing from branch 'staging'; Production from 'main' (manual approval).
+// Jenkins pipeline: build once on main, promote image through
+// Staging → Testing → Production using docker-compose deployments.
 //
-// Required Jenkins configuration:
-// - Set DOCKER_REGISTRY (job or global env) to your registry URL, e.g. registry.example.com
-// - Create Username/Password credential with id 'docker-registry-credentials' for push
-// - SSH credentials as defined in SSH_CRED_126 and SSH_CRED_144
-// - Agent: Linux node (Ubuntu 22.04 recommended) with Docker daemon running.
-//   For Docker agent support, install the "Docker Pipeline" plugin and switch back to docker agent.
-// =============================================================================
+// Requirements:
+// - Jenkins agent with: git, Docker, docker compose, .NET SDK.
+// - Docker registry credentials in Jenkins (DockerHub/ECR/ACR, etc).
+// - SSH access from Jenkins to each environment VM.
+// - Per-environment env files already on the VMs:
+//   - /secure/todolist/staging.env
+//   - /secure/todolist/testing.env
+//   - /secure/todolist/production.env
 
 pipeline {
   agent any
 
   options {
-    skipDefaultCheckout(true)
     timestamps()
     disableConcurrentBuilds()
     timeout(time: 30, unit: 'MINUTES')
   }
 
+  triggers {
+    // Recommended: use webhooks instead of cron if possible.
+    pollSCM('H/5 * * * *')
+  }
+
   environment {
     DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 
-    APP_IMAGE_NAME       = "todolist-api"
-    DOCKER_REGISTRY      = "${env.DOCKER_REGISTRY ?: 'registry.example.com'}"  // Override in Jenkins env
-    IMAGE_TAG            = "${env.GIT_COMMIT ?: 'unknown'}"
+    // Registry (configure in Jenkins global env or per-job)
+    DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'local'}"
+    DOCKER_IMAGE    = "${env.DOCKER_IMAGE ?: 'todolist-api'}"
 
-    STAGING_HOST         = "10.50.30.126"
-    TESTING_HOST         = "10.50.30.126"
-    PRODUCTION_HOST      = "10.50.30.144"
+    // SSH + remote paths (configure per environment in Jenkins)
+    STAGING_HOST          = "${env.STAGING_HOST ?: 'staging-host'}"
+    TESTING_HOST          = "${env.TESTING_HOST ?: 'testing-host'}"
+    PROD_HOST             = "${env.PROD_HOST   ?: 'prod-host'}"
+    REMOTE_APP_PATH       = "${env.REMOTE_APP_PATH ?: '/opt/ToDoList'}"
+    REMOTE_ENV_STAGING    = "${env.REMOTE_ENV_STAGING ?: '/secure/todolist/staging.env'}"
+    REMOTE_ENV_TESTING    = "${env.REMOTE_ENV_TESTING ?: '/secure/todolist/testing.env'}"
+    REMOTE_ENV_PRODUCTION = "${env.REMOTE_ENV_PRODUCTION ?: '/secure/todolist/production.env'}"
 
-    REMOTE_APP_PATH      = "/opt/todolist"
-    REMOTE_TAG_FILE      = ".deployed_image_tag"
-    REMOTE_PREVIOUS_TAG  = ".previous_image_tag"
+    // Credential IDs (configure in Jenkins Credentials)
+    DOCKER_CREDS_ID = "${env.DOCKER_CREDS_ID ?: 'docker-registry-creds'}"
+    SSH_CREDS_ID    = "${env.SSH_CREDS_ID    ?: 'ssh-deploy'}"
 
-    STAGING_API_PORT     = "8081"
-    TESTING_API_PORT     = "8082"
-    PRODUCTION_API_PORT  = "8081"
-
-    SSH_CRED_126         = "ssh-posb-10-50-30-126"
-    SSH_CRED_144         = "ssh-posb-10-50-30-144"
-
-    SSH_OPTS             = "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=15 -o BatchMode=yes"
+    SSH_OPTS = "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ConnectTimeout=15 -o BatchMode=yes"
   }
 
   stages {
-    stage('Prepare Tools') {
-      when { anyOf { branch 'staging'; branch 'main' } }
-      steps {
-        echo "[Prepare Tools] Verifying required CLI tools (.NET 8, docker, curl, ssh, git) are available on the agent..."
-        sh '''
-          set -e
-
-          echo "[Prepare Tools] Checking docker..."
-          command -v docker >/dev/null 2>&1 || { echo "docker is not installed or not in PATH on this agent."; exit 1; }
-          docker --version
-
-          echo "[Prepare Tools] Checking dotnet..."
-          command -v dotnet >/dev/null 2>&1 || { echo "dotnet SDK is not installed or not in PATH on this agent."; exit 1; }
-          dotnet --version
-
-          echo "[Prepare Tools] Checking git..."
-          command -v git >/dev/null 2>&1 || { echo "git is not installed or not in PATH on this agent."; exit 1; }
-          git --version
-
-          echo "[Prepare Tools] Checking ssh..."
-          command -v ssh >/dev/null 2>&1 || { echo "ssh client is not installed or not in PATH on this agent."; exit 1; }
-          ssh -V || true
-
-          echo "[Prepare Tools] Checking curl..."
-          command -v curl >/dev/null 2>&1 || { echo "curl is not installed or not in PATH on this agent."; exit 1; }
-          curl --version
-        '''
-      }
-    }
-
     stage('Checkout') {
+      when { branch 'main' }
       steps {
-        echo "[Checkout] Checking out source..."
         checkout scm
-        echo "[Checkout] Commit: ${env.GIT_COMMIT}"
-      }
-    }
-
-    stage('Build') {
-      when { anyOf { branch 'staging'; branch 'main' } }
-      steps {
-        echo "[Build] Restoring and building .NET project (Release)..."
-        sh 'dotnet restore'
-        sh 'dotnet build --configuration Release --no-restore'
-        echo "[Build] Build completed successfully."
-      }
-    }
-
-    stage('Test') {
-      when { anyOf { branch 'staging'; branch 'main' } }
-      steps {
-        echo "[Test] Running unit tests..."
-        sh 'dotnet test --configuration Release --no-build --verbosity normal'
-        echo "[Test] All tests passed."
-      }
-    }
-
-    stage('Docker Build') {
-      when { anyOf { branch 'staging'; branch 'main' } }
-      steps {
-        echo "[Docker Build] Building image ${DOCKER_REGISTRY}/${APP_IMAGE_NAME}:${IMAGE_TAG}"
-        sh "docker build -t ${DOCKER_REGISTRY}/${APP_IMAGE_NAME}:${IMAGE_TAG} -t ${APP_IMAGE_NAME}:${IMAGE_TAG} ."
-        echo "[Docker Build] Image built successfully."
-      }
-    }
-
-    stage('Push Image') {
-      when { anyOf { branch 'staging'; branch 'main' } }
-      steps {
-        echo "[Push Image] Pushing to ${DOCKER_REGISTRY}/${APP_IMAGE_NAME}:${IMAGE_TAG}"
-        withCredentials([usernamePassword(
-          credentialsId: 'docker-registry-credentials',
-          usernameVariable: 'REGISTRY_USER',
-          passwordVariable: 'REGISTRY_PASS'
-        )]) {
-          sh """
-            echo \"\$REGISTRY_PASS\" | docker login -u \"\$REGISTRY_USER\" --password-stdin ${DOCKER_REGISTRY} || true
-            docker push ${DOCKER_REGISTRY}/${APP_IMAGE_NAME}:${IMAGE_TAG}
-          """
+        script {
+          echo "Commit: ${env.GIT_COMMIT}"
         }
-        echo "[Push Image] Image pushed successfully."
+      }
+    }
+
+    stage('Build & Test') {
+      when { branch 'main' }
+      steps {
+        sh 'dotnet restore src/ToDoList.Api/ToDoList.Api.csproj'
+        sh 'dotnet build src/ToDoList.Api/ToDoList.Api.csproj --configuration Release --no-restore'
+        sh 'dotnet test src/ToDoList.UnitTests/ToDoList.UnitTests.csproj --configuration Release --verbosity normal --no-build'
+      }
+    }
+
+    stage('Build & Push Image') {
+      when { branch 'main' }
+      steps {
+        script {
+          // Use short SHA as part of immutable tag
+          def shortSha = env.GIT_COMMIT.take(7)
+          env.IMAGE_TAG = "${shortSha}"
+          def fullImage = "${env.DOCKER_REGISTRY}/${env.DOCKER_IMAGE}:${env.IMAGE_TAG}"
+          echo "Building image: ${fullImage}"
+
+          docker.withRegistry('', DOCKER_CREDS_ID) {
+            sh """
+              docker build -t ${fullImage} .
+              docker push ${fullImage}
+            """
+          }
+        }
       }
     }
 
     stage('Deploy to Staging') {
-      when { branch 'staging' }
+      when { branch 'main' }
       steps {
-        echo "[Deploy] Deploying to Staging (${STAGING_HOST})..."
         script {
-          deployToEnvironment(
+          deployToEnv(
+            envName: 'staging',
             host: env.STAGING_HOST,
-            credId: env.SSH_CRED_126,
-            envName: 'Staging',
-            composeProject: 'todolist-staging',
-            healthPort: env.STAGING_API_PORT,
-            branchName: 'staging'
+            remotePath: env.REMOTE_APP_PATH,
+            envFile: env.REMOTE_ENV_STAGING,
+            imageTag: env.IMAGE_TAG
           )
         }
-        echo "[Deploy] Staging deployment completed."
+      }
+    }
+
+    stage('Approve: Promote to Testing') {
+      when { branch 'main' }
+      steps {
+        timeout(time: 14, unit: 'DAYS') {
+          input message: "Promote image tag ${env.IMAGE_TAG} to TESTING?", ok: "Promote"
+        }
       }
     }
 
     stage('Deploy to Testing') {
-      when { branch 'staging' }
-      steps {
-        echo "[Deploy] Deploying to Testing (${TESTING_HOST})..."
-        script {
-          deployToEnvironment(
-            host: env.TESTING_HOST,
-            credId: env.SSH_CRED_126,
-            envName: 'Testing',
-            composeProject: 'todolist-testing',
-            healthPort: env.TESTING_API_PORT,
-            branchName: 'staging'
-          )
-        }
-        echo "[Deploy] Testing deployment completed."
-      }
-    }
-
-    stage('Deploy to Production (manual)') {
       when { branch 'main' }
       steps {
         script {
-          def proceed = input(
-            message: "Deploy commit ${env.GIT_COMMIT} to Production (${env.PRODUCTION_HOST})?",
-            ok: 'Deploy',
-            parameters: []
+          deployToEnv(
+            envName: 'testing',
+            host: env.TESTING_HOST,
+            remotePath: env.REMOTE_APP_PATH,
+            envFile: env.REMOTE_ENV_TESTING,
+            imageTag: env.IMAGE_TAG
           )
         }
-        echo "[Deploy] Deploying to Production (${PRODUCTION_HOST})..."
+      }
+    }
+
+    stage('Approve: Promote to Production') {
+      when { branch 'main' }
+      steps {
+        timeout(time: 14, unit: 'DAYS') {
+          input message: "Promote image tag ${env.IMAGE_TAG} to PRODUCTION?", ok: "Promote"
+        }
+      }
+    }
+
+    stage('Deploy to Production') {
+      when { branch 'main' }
+      steps {
         script {
-          deployToEnvironment(
-            host: env.PRODUCTION_HOST,
-            credId: env.SSH_CRED_144,
-            envName: 'Production',
-            composeProject: 'todolist-prod',
-            healthPort: env.PRODUCTION_API_PORT,
-            branchName: 'main'
+          deployToEnv(
+            envName: 'production',
+            host: env.PROD_HOST,
+            remotePath: env.REMOTE_APP_PATH,
+            envFile: env.REMOTE_ENV_PRODUCTION,
+            imageTag: env.IMAGE_TAG
           )
         }
-        echo "[Deploy] Production deployment completed."
       }
     }
   }
 
   post {
     failure {
-      echo "[Pipeline] Pipeline failed. Check logs above."
+      echo 'Pipeline failed. Check logs above.'
     }
     success {
-      echo "[Pipeline] Pipeline finished successfully."
+      echo "Pipeline completed successfully for image tag ${env.IMAGE_TAG ?: 'N/A'}."
     }
   }
 }
 
-// -----------------------------------------------------------------------------
-// Deploy to a single environment via SSH: pull image, up, health check, rollback on failure
-// -----------------------------------------------------------------------------
-void deployToEnvironment(Map args) {
-  String host        = args.host
-  String credId      = args.credId
-  String envName     = args.envName
-  String composeProj = args.composeProject
-  String healthPort  = args.healthPort
-  String branchName  = args.branchName ?: 'staging'
+// Deploy a specific image tag to a given environment VM using docker compose.
+void deployToEnv(Map args) {
+  def envName   = args.envName
+  def host      = args.host
+  def remoteDir = args.remotePath
+  def envFile   = args.envFile
+  def imageTag  = args.imageTag
 
-  String fullImage = "${env.DOCKER_REGISTRY}/${env.APP_IMAGE_NAME}:${env.IMAGE_TAG}"
-  String healthUrl  = "http://${host}:${healthPort}/health"
+  if (!imageTag) {
+    error "IMAGE_TAG is not set; cannot deploy."
+  }
 
-  sshagent(credentials: [credId]) {
+  echo "Deploying image tag ${imageTag} to ${envName} on ${host}..."
+
+  sshagent(credentials: [env.SSH_CREDS_ID]) {
     sh """
       set -e
-      export DOCKER_REGISTRY="${env.DOCKER_REGISTRY}"
-      export IMAGE_TAG="${env.IMAGE_TAG}"
-      export ASPNETCORE_ENVIRONMENT="${envName}"
-
-      ssh ${env.SSH_OPTS} ${host} /bin/bash -s -- "${env.REMOTE_APP_PATH}" "${env.REMOTE_TAG_FILE}" "${env.REMOTE_PREVIOUS_TAG}" "${fullImage}" "${composeProj}" "${envName}" "${branchName}" "${env.GIT_COMMIT}" << 'REMOTE_SCRIPT'
+      ssh ${env.SSH_OPTS} ${host} /bin/bash -s -- "${remoteDir}" "${envFile}" "${env.DOCKER_REGISTRY}" "${env.DOCKER_IMAGE}" "${imageTag}" << 'REMOTE_SCRIPT'
         set -e
-        REMOTE_APP_PATH="\$1"
-        TAG_FILE="\$2"
-        PREV_FILE="\$3"
-        FULL_IMAGE="\$4"
-        COMPOSE_PROJECT="\$5"
-        ENV_NAME="\$6"
-        GIT_BRANCH="\$7"
-        GIT_COMMIT="\$8"
+        REMOTE_PATH="\$1"
+        ENV_FILE="\$2"
+        REGISTRY="\$3"
+        IMAGE_NAME="\$4"
+        TAG="\$5"
 
-        cd "\$REMOTE_APP_PATH" || { echo "Failed to cd to \$REMOTE_APP_PATH"; exit 1; }
-        ( git fetch --all && git checkout "\$GIT_BRANCH" && git reset --hard "\$GIT_COMMIT" ) || true
+        mkdir -p "\$REMOTE_PATH"
+        cd "\$REMOTE_PATH"
 
-        # Save current image as previous for rollback (full image name)
-        if [ -f "\$TAG_FILE" ]; then
-          cp "\$TAG_FILE" "\$PREV_FILE"
+        if [ ! -f docker-compose.yml ]; then
+          echo "ERROR: docker-compose.yml not found in \$REMOTE_PATH. Please deploy the repo to the server first."
+          exit 1
         fi
-        echo "\$FULL_IMAGE" > "\$TAG_FILE"
 
-        export DOCKER_REGISTRY="\${FULL_IMAGE%%/*}"
-        export IMAGE_TAG="\${FULL_IMAGE##*:}"
-        export ASPNETCORE_ENVIRONMENT="\$ENV_NAME"
+        export DOCKER_REGISTRY="\$REGISTRY"
+        export IMAGE_TAG="\$TAG"
 
-        echo "Pulling image \$FULL_IMAGE..."
-        docker compose -p "\$COMPOSE_PROJECT" pull api || { echo "Pull failed"; exit 1; }
-        echo "Starting services..."
-        docker compose -p "\$COMPOSE_PROJECT" up -d api || { echo "Compose up failed"; exit 1; }
-        echo "Waiting for application to be ready..."
-        sleep 10
+        docker compose -p "todolist-${envName}" --env-file "\$ENV_FILE" -f docker-compose.yml -f docker-compose.${envName}.yml pull
+        docker compose -p "todolist-${envName}" --env-file "\$ENV_FILE" -f docker-compose.yml -f docker-compose.${envName}.yml up -d
+
+        docker compose -p "todolist-${envName}" ps
 REMOTE_SCRIPT
     """
-
-    echo "[Health Check] Verifying ${healthUrl}..."
-    def healthOk = false
-    def attempts = 0
-    def maxAttempts = 12
-    while (!healthOk && attempts < maxAttempts) {
-      attempts++
-      try {
-        def resp = sh(
-          script: "curl -sf -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 '${healthUrl}'",
-          returnStdout: true
-        ).trim()
-        if (resp == '200') {
-          healthOk = true
-          echo "[Health Check] Application healthy (HTTP 200)."
-        } else {
-          echo "[Health Check] Attempt ${attempts}/${maxAttempts}: got HTTP ${resp}, retrying in 10s..."
-          sleep(time: 10, unit: 'SECONDS')
-        }
-      } catch (Exception e) {
-        echo "[Health Check] Attempt ${attempts}/${maxAttempts}: request failed, retrying in 10s..."
-        sleep(time: 10, unit: 'SECONDS')
-      }
-    }
-
-    if (!healthOk) {
-      echo "[Health Check] Failed after ${maxAttempts} attempts. Rolling back..."
-      sshagent(credentials: [credId]) {
-        sh """
-          set -e
-          ssh ${env.SSH_OPTS} ${host} /bin/bash -s -- "${env.REMOTE_APP_PATH}" "${env.REMOTE_TAG_FILE}" "${env.REMOTE_PREVIOUS_TAG}" "${composeProj}" << 'ROLLBACK_SCRIPT'
-            set -e
-            REMOTE_APP_PATH="\$1"
-            TAG_FILE="\$2"
-            PREV_FILE="\$3"
-            COMPOSE_PROJECT="\$4"
-            cd "\$REMOTE_APP_PATH" || exit 1
-            if [ ! -f "\$PREV_FILE" ]; then
-              echo "No previous image to roll back to."
-              exit 1
-            fi
-            PREV_FULL_IMAGE=\$(cat "\$PREV_FILE")
-            export DOCKER_REGISTRY="\${PREV_FULL_IMAGE%/*}"
-            export IMAGE_TAG="\${PREV_FULL_IMAGE##*:}"
-            echo "Rolling back to \$PREV_FULL_IMAGE..."
-            docker compose -p "\$COMPOSE_PROJECT" pull api && docker compose -p "\$COMPOSE_PROJECT" up -d api
-            echo "\$PREV_FULL_IMAGE" > "\$TAG_FILE"
-            echo "Rollback completed."
-ROLLBACK_SCRIPT
-        """
-      }
-      error("Deployment to ${envName} failed: health check did not pass. Rollback completed.")
-    }
   }
+
+  echo "Deploy to ${envName} completed."
 }
+

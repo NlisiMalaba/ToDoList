@@ -1,1 +1,1 @@
-this is an experimental project for learning CI/CD using jenkins
+This is an experimental project for learning CI/CD using jenkins

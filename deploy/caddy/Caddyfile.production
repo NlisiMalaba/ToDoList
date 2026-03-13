@@ -1,0 +1,17 @@
+{
+	# For real TLS, terminate HTTPS here with a real domain.
+	# Example (requires DNS + public reachability):
+	# todolist.example.com {
+	#   reverse_proxy api:80
+	# }
+	#
+	# In this repo we keep a safe default (HTTP) and expect TLS to be enabled
+	# when you set PROD_HOSTNAME and route traffic appropriately.
+	auto_https off
+}
+
+:80 {
+	# Production should be public, but you may still want rate limiting/WAF upstream.
+	reverse_proxy api:80
+}
+

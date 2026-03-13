@@ -1,0 +1,43 @@
+services:
+  edge:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "${STAGING_EDGE_PORT:-8080}:80"
+    environment:
+      - STAGING_BASIC_AUTH_USER=${STAGING_BASIC_AUTH_USER}
+      - STAGING_BASIC_AUTH_PASSWORD_HASH=${STAGING_BASIC_AUTH_PASSWORD_HASH}
+      - STAGING_ALLOWED_CIDRS=${STAGING_ALLOWED_CIDRS}
+    volumes:
+      - ./deploy/caddy/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+
+  api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Staging
+      - ConnectionStrings__Default=Server=staging-db;Port=3306;Database=${STAGING_DB_NAME};User=${STAGING_DB_USER};Password=${STAGING_DB_PASSWORD};
+    depends_on:
+      staging-db:
+        condition: service_healthy
+
+  staging-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${STAGING_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${STAGING_DB_NAME}
+      - MYSQL_USER=${STAGING_DB_USER}
+      - MYSQL_PASSWORD=${STAGING_DB_PASSWORD}
+    ports:
+      - "${STAGING_DB_PORT:-13306}:3306"
+    volumes:
+      - mysql_data_staging:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${STAGING_DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data_staging:
+
