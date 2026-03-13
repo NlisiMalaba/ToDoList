@@ -51,7 +51,8 @@ public class TodoTaskConfiguration : IEntityTypeConfiguration<TodoTask>
 
         builder.Property(t => t.RowVersion)
             .HasColumnName("row_version")
-            .IsRowVersion();
+            .IsConcurrencyToken()
+            .ValueGeneratedOnAddOrUpdate();
 
         builder.HasIndex(t => t.IsCompleted).HasDatabaseName("ix_todo_tasks_is_completed");
 

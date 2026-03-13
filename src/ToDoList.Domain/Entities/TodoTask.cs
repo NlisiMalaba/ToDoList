@@ -15,7 +15,7 @@ public class TodoTask
     public string? UpdatedBy { get; private set; }
     public bool IsDeleted { get; private set; }
 
-    public byte[] RowVersion { get; private set; } = Array.Empty<byte>();
+    public DateTime RowVersion { get; private set; }
 
     private TodoTask()
     {
