@@ -90,7 +90,7 @@ pipeline {
           deployToEnvironment(
             envName: 'staging',
             containerName: 'staging',
-            hostPort: 8081,
+            hostPort: 8084,
             envFile: "${env.DEPLOY_ENV_DIR}/.env.staging"
           )
         }
@@ -218,10 +218,16 @@ void deployToEnvironment(Map args) {
         IMAGE_FULL="\${IMAGE_NAME}:\${IMAGE_TAG}"
         echo "Loading image \${IMAGE_FULL}..."
         docker load -i /tmp/todolist-api.tar
+        echo "Stopping any container using port \${HOST_PORT}..."
+        for cid in \$(docker ps -q --filter "publish=\${HOST_PORT}" 2>/dev/null); do
+          docker stop "\$cid" 2>/dev/null || true
+          docker rm "\$cid" 2>/dev/null || true
+        done
         echo "Stopping existing container \${CONTAINER_NAME} (if running)..."
         docker stop \${CONTAINER_NAME} 2>/dev/null || true
         echo "Removing container \${CONTAINER_NAME}..."
         docker rm \${CONTAINER_NAME} 2>/dev/null || true
+        sleep 2
         echo "Starting \${CONTAINER_NAME} on port \${HOST_PORT}..."
         docker run -d \\
           --name \${CONTAINER_NAME} \\

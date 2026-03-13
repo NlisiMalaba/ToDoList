@@ -6,7 +6,7 @@ This document describes the multi-environment deployment pipeline for ToDoList.
 
 | Environment | URL | Port | Database | Promotion |
 |-------------|-----|------|----------|-----------|
-| Staging | http://10.50.30.126:8081 | 8081 | app_staging_db | Auto after build/test |
+| Staging | http://10.50.30.126:8084 | 8084 | app_staging_db | Auto after build/test |
 | Testing | http://10.50.30.126:8082 | 8082 | app_testing_db | 2 QA approvals |
 | Production | http://10.50.30.126:8083 | 8083 | app_production_db | QA gate + 3 team lead approvals |
 
