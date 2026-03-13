@@ -15,7 +15,8 @@ public static class DependencyInjection
 
         services.AddDbContext<AppDbContext>(options =>
         {
-            options.UseMySql(connectionString, serverVersion);
+            options.UseMySql(connectionString, serverVersion, mySqlOptions =>
+                mySqlOptions.EnableRetryOnFailure());
         });
 
         services.AddScoped<ITodoTaskRepository, TodoTaskRepository>();

@@ -70,6 +70,8 @@ sudo cp config/.env.production.example /secure/todolist/env/.env.production
 - MySQL instances (or containers) for app_staging_db, app_testing_db, app_production_db
 - Env files at `DEPLOY_ENV_DIR`
 
+**MySQL on host:** If MySQL runs on the host (not in Docker), use `Server=host.docker.internal` in `ConnectionStrings__Default`. The pipeline adds `--add-host=host.docker.internal:host-gateway` so containers can reach the host.
+
 ## Environment Variables
 
 Each env file controls:
