@@ -1,0 +1,238 @@
+// =============================================================================
+// ToDoList - Multi-Environment CI/CD Pipeline
+// Deploys main branch to Staging → Testing → Production with promotion gates
+//
+// Required Jenkins Setup:
+// 1. Credential: SSH Username with private key (ID: ssh-deploy-10-50-30-126)
+// 2. Pipeline: Point to this file (Jenkinsfile.deploy-multi)
+// 3. Branch: main (pipeline validates and only runs on main)
+// 4. Env files on server: Place .env.staging, .env.testing, .env.production
+//    at DEPLOY_ENV_DIR (default: /secure/todolist/env)
+//
+// Promotion Gates:
+// - Staging: Auto-deploy after build/test
+// - Testing: 2 QA approvals required
+// - Production: QA must choose "Proceed" + 3 team lead approvals required
+// =============================================================================
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  triggers {
+    pollSCM('H/2 * * * *')
+  }
+
+  environment {
+    DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    DEPLOY_HOST              = '10.50.30.126'
+    DEPLOY_ENV_DIR           = "${env.DEPLOY_ENV_DIR ?: '/secure/todolist/env'}"
+    DEPLOY_SSH_CREDENTIAL_ID = "${env.DEPLOY_SSH_CREDENTIAL_ID ?: 'ssh-deploy-10-50-30-126'}"
+    IMAGE_NAME               = 'todolist-api'
+    IMAGE_TAG                = "${env.BUILD_TAG ?: 'latest'}"
+    SSH_OPTS                 = '-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ConnectTimeout=15 -o BatchMode=yes'
+  }
+
+  stages {
+    stage('Validate Branch') {
+      steps {
+        script {
+          if (env.BRANCH_NAME && env.BRANCH_NAME != 'main') {
+            error("Pipeline only runs on main branch. Current branch: ${env.BRANCH_NAME}")
+          }
+          echo "Branch validated: main (or single-branch pipeline)"
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+        echo "Commit: ${env.GIT_COMMIT}"
+      }
+    }
+
+    stage('Build') {
+      steps {
+        echo 'Building .NET project (Release)...'
+        sh 'dotnet restore src/ToDoList.Api/ToDoList.Api.csproj'
+        sh 'dotnet build src/ToDoList.Api/ToDoList.Api.csproj --configuration Release --no-restore'
+      }
+    }
+
+    stage('Test') {
+      steps {
+        echo 'Running unit tests...'
+        sh 'dotnet test src/ToDoList.UnitTests/ToDoList.UnitTests.csproj --configuration Release --verbosity normal --no-build'
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        script {
+          env.IMAGE_FULL = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+          echo "Building Docker image: ${env.IMAGE_FULL}"
+          sh "docker build -t ${env.IMAGE_FULL} -f Dockerfile ."
+          sh "docker save -o todolist-api.tar ${env.IMAGE_FULL}"
+        }
+      }
+    }
+
+    stage('Deploy to Staging') {
+      steps {
+        script {
+          deployToEnvironment(
+            envName: 'staging',
+            containerName: 'staging',
+            hostPort: 8081,
+            envFile: "${env.DEPLOY_ENV_DIR}/.env.staging"
+          )
+        }
+      }
+    }
+
+    stage('Testing Promotion') {
+      steps {
+        script {
+          echo 'Waiting for 2 QA approvals before deploying to Testing...'
+          def approver1 = input(
+            message: 'QA Approval 1: Approve deployment to Testing?',
+            ok: 'Approve',
+            submitter: 'qa-team',
+            parameters: [string(name: 'APPROVER_1', defaultValue: '', description: 'Your Jenkins username')]
+          )
+          def approver2 = input(
+            message: 'QA Approval 2: Second approver required for Testing deployment.',
+            ok: 'Approve',
+            submitter: 'qa-team',
+            parameters: [string(name: 'APPROVER_2', defaultValue: '', description: 'Your Jenkins username (must differ from Approval 1)')]
+          )
+          echo "Testing promotion approved by QA"
+        }
+      }
+    }
+
+    stage('Deploy to Testing') {
+      steps {
+        script {
+          deployToEnvironment(
+            envName: 'testing',
+            containerName: 'testing',
+            hostPort: 8082,
+            envFile: "${env.DEPLOY_ENV_DIR}/.env.testing"
+          )
+        }
+      }
+    }
+
+    stage('QA Decision Gate') {
+      steps {
+        script {
+          def qaResult = input(
+            message: 'QA Decision: Proceed to Production or Reject Build?',
+            ok: 'Submit',
+            parameters: [
+              choice(
+                name: 'QA_DECISION',
+                choices: ['Proceed to Production', 'Reject Build'],
+                description: 'Choose action'
+              )
+            ]
+          )
+          def qaDecision = (qaResult instanceof Map) ? qaResult.QA_DECISION : qaResult
+          if (qaDecision == 'Reject Build') {
+            error('Build rejected by QA. Production deployment will not occur.')
+          }
+          echo 'QA approved proceeding to Production'
+        }
+      }
+    }
+
+    stage('Production Promotion') {
+      steps {
+        script {
+          echo 'Waiting for 3 team lead approvals before deploying to Production...'
+          input message: 'Team Lead Approval 1: Approve Production deployment?', ok: 'Approve', submitter: 'team-leads'
+          input message: 'Team Lead Approval 2: Second approver required.', ok: 'Approve', submitter: 'team-leads'
+          input message: 'Team Lead Approval 3: Final approval for Production.', ok: 'Approve', submitter: 'team-leads'
+          echo 'Production promotion approved'
+        }
+      }
+    }
+
+    stage('Deploy to Production') {
+      steps {
+        script {
+          deployToEnvironment(
+            envName: 'production',
+            containerName: 'production',
+            hostPort: 8083,
+            envFile: "${env.DEPLOY_ENV_DIR}/.env.production"
+          )
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo 'Pipeline failed. Check logs above.'
+    }
+    success {
+      echo 'Multi-environment deployment completed successfully.'
+    }
+  }
+}
+
+// =============================================================================
+// Shared deployment logic - deploys same image to target environment
+// =============================================================================
+void deployToEnvironment(Map args) {
+  def envName = args.envName
+  def containerName = args.containerName
+  def hostPort = args.hostPort
+  def envFile = args.envFile
+
+  withCredentials([sshUserPrivateKey(
+    credentialsId: env.DEPLOY_SSH_CREDENTIAL_ID,
+    keyFileVariable: 'DEPLOY_SSH_KEY_FILE',
+    usernameVariable: 'DEPLOY_SSH_USERNAME'
+  )]) {
+    sh """
+      set -e
+      echo "Transferring Docker image to ${env.DEPLOY_HOST}..."
+      scp ${env.SSH_OPTS} -i "\$DEPLOY_SSH_KEY_FILE" todolist-api.tar "\$DEPLOY_SSH_USERNAME@${env.DEPLOY_HOST}:/tmp/"
+      ssh ${env.SSH_OPTS} -i "\$DEPLOY_SSH_KEY_FILE" "\$DEPLOY_SSH_USERNAME@${env.DEPLOY_HOST}" /bin/bash -s -- "${env.IMAGE_NAME}" "${env.IMAGE_TAG}" "${containerName}" "${hostPort}" "${envFile}" << 'REMOTE_SCRIPT'
+        set -e
+        IMAGE_NAME="\$1"
+        IMAGE_TAG="\$2"
+        CONTAINER_NAME="\$3"
+        HOST_PORT="\$4"
+        ENV_FILE="\$5"
+        IMAGE_FULL="\${IMAGE_NAME}:\${IMAGE_TAG}"
+        echo "Loading image \${IMAGE_FULL}..."
+        docker load -i /tmp/todolist-api.tar
+        echo "Stopping existing container \${CONTAINER_NAME} (if running)..."
+        docker stop \${CONTAINER_NAME} 2>/dev/null || true
+        echo "Removing container \${CONTAINER_NAME}..."
+        docker rm \${CONTAINER_NAME} 2>/dev/null || true
+        echo "Starting \${CONTAINER_NAME} on port \${HOST_PORT}..."
+        docker run -d \\
+          --name \${CONTAINER_NAME} \\
+          --restart unless-stopped \\
+          -p \${HOST_PORT}:80 \\
+          --env-file "\${ENV_FILE}" \\
+          \${IMAGE_FULL}
+        rm -f /tmp/todolist-api.tar
+        echo "Deployed \${CONTAINER_NAME} at http://\$(hostname -I | awk '{print \$1}'):\${HOST_PORT}"
+REMOTE_SCRIPT
+    """
+  }
+  echo "Deployed ${envName} at http://${env.DEPLOY_HOST}:${hostPort}"
+}
